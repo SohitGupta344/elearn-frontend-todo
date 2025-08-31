@@ -1,0 +1,90 @@
+name : application-pipeline
+trigger: none
+
+pool: Default   # self-hosted agent use kar rahe ho
+
+stages:
+  - stage: build
+    displayName: build_stage
+    jobs: 
+      - job: build_job
+        displayName: react_todo_application
+        steps: 
+          - task: NodeTool@0
+            inputs:
+              versionSource: 'spec'
+              versionSpec: '16.x'
+
+          - task: Npm@1
+            inputs:
+              command: 'install'
+              workingDir: '$(System.DefaultWorkingDirectory)'
+
+          - task: Npm@1
+            inputs:
+              command: 'custom'
+              workingDir: '$(System.DefaultWorkingDirectory)'
+              customCommand: 'cache clean --force'
+
+          - task: Npm@1
+            inputs:
+              command: 'custom'
+              customCommand: 'run build'
+              workingDir: '$(System.DefaultWorkingDirectory)'
+
+          - task: PublishBuildArtifacts@1
+            displayName: publish-artifacts
+            inputs:
+              PathtoPublish: '$(System.DefaultWorkingDirectory)/build'
+              ArtifactName: 'todo-application'
+              publishLocation: 'Container'  
+
+  - stage: deploy_stage
+    displayName: deploy-react-todo
+    dependsOn: build
+    jobs:
+      - job: 
+        displayName: deploy-react-todo-application
+        steps:
+          - task: DownloadBuildArtifacts@1
+            displayName: download-artifacts
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'todo-application'
+              downloadPath: '$(System.ArtifactsDirectory)'
+
+          - task: CopyFilesOverSSH@0
+            inputs:
+              sshEndpoint: 'sunday25augvm'   # 👈 updated
+              sourceFolder: '$(System.ArtifactsDirectory)/todo-application'
+              contents: '**'
+              targetFolder: '/tmp/todo'
+              readyTimeout: '20000'
+
+          - task: SSH@0
+            displayName: install_Nginx
+            inputs:
+              sshEndpoint: 'sunday25augvm'
+              runOptions: 'inline'
+              inline: |
+                sudo apt update -y
+                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nginx
+                sudo systemctl enable nginx || true
+                sudo systemctl start nginx || true
+                sudo systemctl status nginx --no-pager
+              readyTimeout: '20000'
+
+          - task: SSH@0
+            inputs:
+              sshEndpoint: 'sunday25augvm'   # 👈 updated
+              runOptions: 'commands'
+              commands: 'sudo chown -R www-data:www-data /var/www/html/'
+              readyTimeout: '20000' 
+
+          - task: SSH@0
+            inputs:
+              sshEndpoint: 'sunday25augvm'   # 👈 updated
+              runOptions: 'commands'
+              commands: 'sudo cp -r /tmp/todo/* /var/www/html/'
+              readyTimeout: '20000'
